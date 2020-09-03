@@ -4,6 +4,8 @@ import numpy as np
 import os
 from utils import read_csv, multiprocess, split_data
 from config import DATA_PATH
+
+from collections import Counter
 from joblib import Parallel, delayed
 from tqdm import tqdm
 
@@ -110,27 +112,39 @@ def keywords_freq(paper_df, year):
     return count
 
 
-# def fos_names(paper_df):
-#     def process(df):
-#         fnames = set()
-#         for name in df['fos_name'].values:
-#             fnames = fnames.union(set(name.split(';')))
-#         return fnames
-#
-#     fos_names = set()
-#     results = Parallel(n_jobs=12)(delayed(process)(d) for d in tqdm(paper_df))
-#     fos_names = fos_names.union(*results)
-#     return list(fos_names)
+def fos_freq(paper_df):
+    def process(df):
+        fos_count = Counter()
+        for name in df['fos_name'].values:
+            fos_count += Counter(str(name).split(';'))
+        return fos_count
 
-def fos_names(df):
-    fnames = set()
-    for name in df['fos_name'].values:
-        fnames = fnames.union(set(name.split(';')))
-    return list(fnames)
+    fos_count = Counter()
+    data = split_data(paper_df.dropna(subset=['fos_name']), size=1000)
+    results = Parallel(n_jobs=12)(delayed(process)(d) for d in tqdm(data))
+    for result in results:
+        fos_count += result
+    fos_freq_df = pd.DataFrame()
+    fos_freq_df['fos_name'] = fos_count.keys()
+    fos_freq_df['freq'] = fos_count.values()
+    return fos_freq_df
 
 
-# def fos_freq(paper_df):
-#     def process
+def region_str(author_df, by='country'):
+    df = author_df.dropna(subset=[by]).copy().reset_index(drop=True)
+    df = df[['n_cites', by]]
+
+    def h_index(df):
+        processed_df = df.sort_values(by=['n_cites'], ascending=False).copy().reset_index(drop=True)
+        index = processed_df.shape[0]
+        for i in range(0, processed_df.shape[0]):
+            if int(processed_df['n_cites'][i]) <= i:
+                index = i
+        return pd.DataFrame({by: [df[by].values[0]], 'h_index': [index]})
+
+    # h_index(split_data(df, by=by)[0])
+    reg_str = multiprocess(h_index, split_data(df, by=by), n_jobs=12)
+    return reg_str
 
 
 ####################################### COAUTHOR ###################################################
@@ -179,32 +193,35 @@ def cooperate_strength(coauthor_df, author_df, by='country'):
 
 if __name__ == '__main__':
 
-    ####################################### PREPROCESS ##################################################
+#     ####################################### PREPROCESS ##################################################
 #     # In asn author dataset, an author can have several affiliations, choose the first one.
 #     # author_df['affiliation'] = author_df['affiliations'].apply(lambda s: s.split(';')[0] if s else np.nan)
 #
 #     # For now, the author attribute for paper is the first of the authors.
 #     # dblp_paper_df['affiliation'] = dblp_paper_df['authors_org'].apply(lambda s: s.split(';')[0] if s else np.nan)
 #     # asn_paper_df['author_name'] = asn_paper_df['authors_name'].apply(lambda s: s.split(';')[0] if s else np.nan)
-    dblp_paper_df = read_csv(DATA_PATH, 'dblp_paper.csv')
-#     paper_df = dblp_paper_df.dropna(subset=['authors_org']).copy().reset_index(drop=True)
-#     paper_df['affiliation'] = paper_df['authors_org'].apply(lambda s: s.split(';')[0] if s else None)
-#     global_overview_df = overview(paper_df)
-#     global_overview_df.to_csv(os.path.join(DATA_PATH, 'global_overview.csv'), index=False)
-#
-#     growth_rate_df = annual_growth_rate(global_overview_df)
-#     growth_rate_df.to_csv(os.path.join(DATA_PATH, 'global_overview.csv'), index=False)
-#
-#     # For the sample dblp dataset (LIMIT 10000), we have no keywords, hence this part
-#     # keywords_freq_df = pd.DataFrame()
-#     # paper_df = dblp_paper_df.dropna(subset=['year', 'keywords'])
-#     # for year in pd.unique(paper_df['year']):
-#     #     kf = {'year': year}
-#     #     kf.update(keywords_freq(paper_df, year))
-#     #     keywords_freq_df.append(kf)
-#     # keywords_freq_df.fillna(0)
-#
-#     author_df = read_csv(DATA_PATH, 'author.csv', index='author_id')
-    fos_df = pd.DataFrame()
-    fos_df['fos'] = fos_names(dblp_paper_df)
-    fos_df.to_csv(os.path.join(DATA_PATH, 'fos_freq.csv'), index=False)
+#     dblp_paper_df = read_csv(DATA_PATH, 'dblp_paper.csv')
+# #     paper_df = dblp_paper_df.dropna(subset=['authors_org']).copy().reset_index(drop=True)
+# #     paper_df['affiliation'] = paper_df['authors_org'].apply(lambda s: s.split(';')[0] if s else None)
+# #     global_overview_df = overview(paper_df)
+# #     global_overview_df.to_csv(os.path.join(DATA_PATH, 'global_overview.csv'), index=False)
+# #
+# #     growth_rate_df = annual_growth_rate(global_overview_df)
+# #     growth_rate_df.to_csv(os.path.join(DATA_PATH, 'global_overview.csv'), index=False)
+# #
+# #     # For the sample dblp dataset (LIMIT 10000), we have no keywords, hence this part
+# #     # keywords_freq_df = pd.DataFrame()
+# #     # paper_df = dblp_paper_df.dropna(subset=['year', 'keywords'])
+# #     # for year in pd.unique(paper_df['year']):
+# #     #     kf = {'year': year}
+# #     #     kf.update(keywords_freq(paper_df, year))
+# #     #     keywords_freq_df.append(kf)
+# #     # keywords_freq_df.fillna(0)
+# #
+# #     author_df = read_csv(DATA_PATH, 'author.csv', index='author_id')
+#     for year in range(2010, 2020):
+#         print(f'START YEAR {year}')
+#         fos_freq_df = fos_freq(dblp_paper_df[dblp_paper_df['year'] == year])
+#         fos_freq_df.to_csv(os.path.join(DATA_PATH, f'fos_freq_{year}.csv'), index=False)
+    paper_df = read_csv(DATA_PATH, 'paper.csv')
+    region_str(paper_df)
